@@ -119,14 +119,14 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
+        # SwiGLU with 8/3 expansion (rounded to multiple of 64) keeps params ~= 4x ReLU² MLP
+        hidden = ((int(8 * config.n_embd / 3) + 63) // 64) * 64
+        self.c_fc = nn.Linear(config.n_embd, hidden, bias=False)
+        self.c_gate = nn.Linear(config.n_embd, hidden, bias=False)
+        self.c_proj = nn.Linear(hidden, config.n_embd, bias=False)
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = F.relu(x).square()
-        x = self.c_proj(x)
-        return x
+        return self.c_proj(F.silu(self.c_gate(x)) * self.c_fc(x))
 
 
 class Block(nn.Module):
@@ -180,6 +180,7 @@ class GPT(nn.Module):
             torch.nn.init.uniform_(block.attn.c_v.weight, -s, s)
             torch.nn.init.zeros_(block.attn.c_proj.weight)
             torch.nn.init.uniform_(block.mlp.c_fc.weight, -s, s)
+            torch.nn.init.uniform_(block.mlp.c_gate.weight, -s, s)
             torch.nn.init.zeros_(block.mlp.c_proj.weight)
         # Per-layer scalars
         self.resid_lambdas.fill_(1.0)
@@ -527,9 +528,8 @@ optimizer = model.setup_optimizer(
     weight_decay=WEIGHT_DECAY,
 )
 
-# torch.compile disabled for CPU-only training
-# if torch.cuda.is_available():
-#     model = torch.compile(model, dynamic=False)
+if torch.cuda.is_available():
+    model = torch.compile(model, dynamic=False)
 
 train_loader = make_dataloader(tokenizer, DEVICE_BATCH_SIZE, MAX_SEQ_LEN, "train")
 x, y, epoch = next(train_loader)  # prefetch first batch
