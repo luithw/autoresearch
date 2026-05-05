@@ -41,6 +41,8 @@ def maybe_compile(fn):
     return fn
 
 
+
+
 # ---------------------------------------------------------------------------
 # GPT Model
 # ---------------------------------------------------------------------------
@@ -442,7 +444,7 @@ MUON_MOMENTUM_RAMP = 500 # steps to ramp Muon momentum from 0.85 to 0.95 (was 30
 
 # Model size
 DEPTH = 12              # number of transformer layers (was 8)
-DEVICE_BATCH_SIZE = 16  # per-device batch size
+DEVICE_BATCH_SIZE = 8  # per-device batch size
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
