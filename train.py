@@ -9,6 +9,7 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
 import gc
+import json
 import math
 import time
 from dataclasses import dataclass, asdict
@@ -444,7 +445,7 @@ MUON_MOMENTUM_RAMP = 500 # steps to ramp Muon momentum from 0.85 to 0.95 (was 30
 
 # Model size
 DEPTH = 12              # number of transformer layers (was 8)
-DEVICE_BATCH_SIZE = 8  # per-device batch size
+DEVICE_BATCH_SIZE = 12  # per-device batch size (increased from 8 for better throughput)
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -605,6 +606,15 @@ while True:
 
     step += 1
 
+    # Mid-training eval at 50% time budget
+    if step > 10 and total_training_time >= TIME_BUDGET * 0.5 and not locals().get('_did_mid_eval', False):
+        model.eval()
+        with autocast_ctx:
+            mid_val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
+        print(f"\n[mid-eval @ 50%] val_bpb: {mid_val_bpb:.6f}")
+        model.train()
+        _did_mid_eval = True
+
     # Time's up — but only stop after warmup steps so we don't count compilation
     if step > 10 and total_training_time >= TIME_BUDGET:
         break
@@ -634,3 +644,19 @@ print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
 print(f"num_steps:        {step}")
 print(f"num_params_M:     {num_params / 1e6:.1f}")
 print(f"depth:            {DEPTH}")
+
+# Write result.json for experiment tracking
+results = {
+    "val_bpb": float(val_bpb),
+    "loss": float(loss),
+    "lrm": float(lrm),
+    "mfu": float(steady_state_mfu) / 100.0,
+    "peak_vram_mb": float(peak_vram_mb),
+    "training_seconds": float(total_training_time),
+    "total_tokens_M": float(total_tokens / 1e6),
+    "num_steps": int(step),
+    "num_params_M": float(num_params / 1e6),
+    "depth": int(DEPTH),
+}
+with open("result.json", "w") as f:
+    json.dump(results, f, indent=2)
